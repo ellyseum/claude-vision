@@ -1,12 +1,21 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "ellyseum-claude-vision",
+  "description": "Visual context skills for Claude Code - clipboard, screenshots, and video analysis",
+  "owner": {
+    "name": "Ellyseum",
+    "email": "jocelyn@ellyseum.dev"
+  },
   "plugins": [
     {
       "name": "claude-vision",
-      "version": "1.0.0",
       "description": "Visual context skills for Claude Code - clipboard, screenshots, and video analysis",
-      "homepage": "https://github.com/ellyseum/claude-vision",
-      "source": ".."
+      "version": "1.0.0",
+      "author": {
+        "name": "Ellyseum",
+        "email": "jocelyn@ellyseum.dev"
+      },
+      "source": "."
     }
   ]
 }
