@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.lite'
   pull_request:
     branches: [main]
-  workflow_dispatch:  # Allow manual trigger
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.lite'
+  workflow_dispatch:  # Allow manual trigger (ignores path filters)
 
 env:
   REGISTRY: ghcr.io
