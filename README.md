@@ -88,6 +88,16 @@ To enable GPU:
 | Screenshot | Yes | Yes | Yes |
 | Video analysis | Yes | Yes | Yes |
 
+### Windows Users: Why WSL?
+
+This plugin runs through WSL (Windows Subsystem for Linux), not native Windows. Here's why:
+
+**Docker Desktop for Windows requires WSL2 anyway.** If you have Docker installed on Windows, you already have WSL2. The plugin just runs inside that same Linux environment where Docker lives.
+
+This keeps the codebase simple—one set of bash scripts instead of maintaining parallel PowerShell versions.
+
+**Need native Windows support?** If you have a use case that requires native Windows commands or a non-Docker workflow, [open an issue](https://github.com/ellyseum/claude-vision/issues) and we'll consider it.
+
 ### Prerequisites
 
 **Clipboard/screenshot:**
