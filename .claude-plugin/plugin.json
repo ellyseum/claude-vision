@@ -2,7 +2,10 @@
   "name": "claude-vision",
   "version": "1.0.0",
   "description": "Visual context skills for Claude Code - clipboard, screenshots, and video analysis",
-  "author": "ellyseum",
+  "author": {
+    "name": "Ellyseum",
+    "email": "jocelyn@ellyseum.dev"
+  },
   "repository": "https://github.com/ellyseum/claude-vision",
   "keywords": ["vision", "clipboard", "screenshot", "video", "analysis"]
 }
