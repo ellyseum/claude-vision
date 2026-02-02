@@ -36,14 +36,27 @@ get_config() {
     fi
 }
 
-# Get image name based on variant
+# Get image name based on variant, auto-tag ghcr.io images if needed
 get_image_name() {
     local variant=$(get_config "image_variant" "full")
-    if [[ "$variant" == "lite" ]]; then
-        echo "claude-vision:lite"
-    else
-        echo "claude-vision:full"
+    local local_name="claude-vision:$variant"
+    local ghcr_name="ghcr.io/ellyseum/claude-vision:$variant"
+
+    # If local tag exists, use it
+    if docker image inspect "$local_name" &>/dev/null; then
+        echo "$local_name"
+        return
     fi
+
+    # If ghcr.io image exists but not tagged locally, tag it
+    if docker image inspect "$ghcr_name" &>/dev/null; then
+        docker tag "$ghcr_name" "$local_name" 2>/dev/null
+        echo "$local_name"
+        return
+    fi
+
+    # Neither exists, return local name (will fail later with helpful message)
+    echo "$local_name"
 }
 
 # Check if running in Docker mode
