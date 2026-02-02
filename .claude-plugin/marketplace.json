@@ -1,0 +1,12 @@
+{
+  "name": "ellyseum-claude-vision",
+  "plugins": [
+    {
+      "name": "claude-vision",
+      "version": "1.0.0",
+      "description": "Visual context skills for Claude Code - clipboard, screenshots, and video analysis",
+      "homepage": "https://github.com/ellyseum/claude-vision",
+      "source": ".."
+    }
+  ]
+}

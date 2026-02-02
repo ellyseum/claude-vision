@@ -1,6 +1,6 @@
 ---
 name: video
-description: Analyze a video or screen recording by extracting frames and describing what happened
+description: Analyze a video or screen recording by extracting frames and spawning an analysis agent
 ---
 
 ## Instructions
@@ -47,8 +47,8 @@ All analyzed videos are cached for fast follow-up questions.
 ├── <url-or-path-hash>/
 │   ├── metadata.json    # URL/path, title, duration, timestamp
 │   ├── subtitles.srt    # transcript (if available)
-│   ├── frames/          # extracted frames
-│   └── analysis.md      # summary from first analysis
+│   ├── frames/          # extracted frames (up to 100+)
+│   └── analysis.md      # summary from previous analysis
 ```
 
 ---
@@ -89,10 +89,16 @@ rm -rf "$HOME/.claude/claude-vision/video-cache/$HASH"
 echo "Removed cache for $HASH"
 ```
 
-### `/video follow-up <question>` or `/video -f <question>` - Follow-up Question
+---
 
-Find the most recently analyzed video by checking metadata timestamps:
+## Standard Analysis Flow
 
+For actual video analysis, this skill extracts frames and transcript, then **spawns the `video-analyzer` agent** with a fresh 200k context to do the heavy analysis.
+
+### Step 1: Determine Video Source
+
+**If follow-up question** (`/video follow-up` or `/video -f`):
+Find most recent cached video:
 ```bash
 CACHE_DIR="$HOME/.claude/claude-vision/video-cache"
 LATEST=""
@@ -107,81 +113,11 @@ for dir in "$CACHE_DIR"/*/; do
     fi
   fi
 done
-
-if [ -z "$LATEST" ]; then
-  echo "No cached videos found. Run /video with a URL or path first."
-  exit 1
-fi
-
-echo "Using cached video: $LATEST"
 ```
-
-Then:
-1. Read all frames from `$LATEST/frames/`
-2. Read `$LATEST/subtitles.srt` if it exists
-3. Read `$LATEST/analysis.md` for context from the previous analysis
-4. Answer the follow-up question based on this cached content
-
----
-
-## Standard Analysis Flow
-
-### Step 1: Load Config
-
-```bash
-CONFIG_FILE="$HOME/.claude/claude-vision/config.json"
-if [[ -f "$CONFIG_FILE" ]]; then
-    OS_TYPE=$(grep -o '"os"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" | cut -d'"' -f4)
-else
-    # Auto-detect
-    if [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then
-        OS_TYPE="wsl"
-    elif [[ "$(uname)" == "Darwin" ]]; then
-        OS_TYPE="macos"
-    else
-        OS_TYPE="linux"
-    fi
-fi
-```
-
-### Step 2: Generate Cache Hash
-
-```bash
-# For URL or path
-SOURCE="<url_or_path>"
-HASH=$(echo -n "$SOURCE" | md5sum | cut -d' ' -f1)
-CACHE_DIR="$HOME/.claude/claude-vision/video-cache/$HASH"
-echo "Cache hash: $HASH"
-```
-
-### Step 3: Check Cache
-
-```bash
-if [ -d "$CACHE_DIR/frames" ] && [ -n "$(ls -A "$CACHE_DIR/frames" 2>/dev/null)" ]; then
-  echo "CACHE HIT: Using cached frames and subtitles"
-  # Check for subtitles
-  if [ -f "$CACHE_DIR/subtitles.srt" ]; then
-    echo "Subtitles available in cache"
-  fi
-  # Check for previous analysis
-  if [ -f "$CACHE_DIR/analysis.md" ]; then
-    echo "Previous analysis available"
-  fi
-else
-  echo "CACHE MISS: Will download/extract fresh"
-fi
-```
-
-**If cache exists:** Skip to Step 7 (Read Frames) - read directly from cache.
-
-**If no cache:** Continue with download/extraction, then save to cache.
-
-### Step 4: Determine Video Source (Cache Miss Only)
+If found, skip to Step 5 (Spawn Agent).
 
 **If a YouTube URL is provided** (contains `youtube.com` or `youtu.be`):
-Download the video AND grab captions/subtitles:
 ```bash
-# Create temp directory
 mkdir -p /tmp/video_dl_$$
 
 # Download video (limit to 720p) + subtitles if available
@@ -190,89 +126,82 @@ cv-run yt-dlp -f "best[height<=720]" \
   --convert-subs srt \
   -o "/tmp/video_dl_$$/video.%(ext)s" "<url>" 2>&1
 
-# Find the downloaded file
 VIDEO_FILE=$(ls /tmp/video_dl_$$/video.mp4 /tmp/video_dl_$$/video.webm /tmp/video_dl_$$/video.mkv 2>/dev/null | head -1)
-
-# Check for subtitles
 SUBS_FILE=$(ls /tmp/video_dl_$$/*.srt 2>/dev/null | head -1)
-if [ -n "$SUBS_FILE" ]; then
-  echo "Subtitles found: $SUBS_FILE"
-fi
-
-# Get video title from yt-dlp
 TITLE=$(cv-run yt-dlp --get-title "<url>" 2>/dev/null || echo "Unknown")
 ```
-**Important:** If subtitles exist, read them first - they provide the audio content as text. Then proceed with frame extraction for visual context.
 
-**If a local path is provided:** Use that video file directly.
+**If a local path is provided:**
 ```bash
 VIDEO_FILE="<provided_path>"
 TITLE=$(basename "$VIDEO_FILE")
 ```
 
-**If no path provided:** Find the latest screen recording. Check these locations based on OS:
+**If no path provided:** Find the latest screen recording based on OS:
 
-**WSL:**
-```bash
-# Windows Game Bar recordings
-SEARCH_DIRS="/mnt/c/Users/*/Videos/Captures /mnt/c/Users/*/Videos"
-```
+- **WSL:** `/mnt/c/Users/*/Videos/Captures`, `/mnt/c/Users/*/Videos`
+- **macOS:** `$HOME/Desktop`, `$HOME/Movies`
+- **Linux:** `$HOME/Videos`, `$HOME/Pictures`
 
-**macOS:**
-```bash
-SEARCH_DIRS="$HOME/Desktop $HOME/Movies"
-```
-
-**Linux:**
-```bash
-SEARCH_DIRS="$HOME/Videos $HOME/Pictures"
-```
-
-Find the newest video file:
 ```bash
 find $SEARCH_DIRS -maxdepth 1 -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.webm" -o -iname "*.mov" \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
 ```
 
-### Step 5: Get Video Duration
+### Step 2: Check Cache
+
+```bash
+SOURCE="<url_or_path>"
+HASH=$(echo -n "$SOURCE" | md5sum | cut -d' ' -f1)
+CACHE_DIR="$HOME/.claude/claude-vision/video-cache/$HASH"
+
+if [ -d "$CACHE_DIR/frames" ] && [ -n "$(ls -A "$CACHE_DIR/frames" 2>/dev/null)" ]; then
+  echo "CACHE HIT: Using cached frames"
+else
+  echo "CACHE MISS: Will extract fresh"
+fi
+```
+
+**If cache exists:** Skip to Step 5 (Spawn Agent).
+
+### Step 3: Get Video Duration
 
 ```bash
 DURATION=$(cv-run ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$VIDEO_FILE")
 echo "Duration: $DURATION seconds"
 ```
 
-### Step 6: Extract Frames (Cache Miss Only)
+### Step 4: Extract Frames and Transcript
 
 **Create cache directory:**
 ```bash
 mkdir -p "$CACHE_DIR/frames"
 ```
 
-**Strategy:** Use scene detection for intelligent frame extraction, with fallback to time-based sampling. Cap at 30 frames max to stay within reasonable token limits.
+**Frame Extraction Strategy:**
 
-**Option A: Scene Detection (preferred for most videos)**
-Extracts frames only when the visual content changes significantly:
+Since the agent has a fresh 200k context, we can be much more generous with frames. Extract up to 100 frames for thorough coverage.
+
+**Option A: Scene Detection (preferred)**
+Use a lower threshold to catch more scene changes:
 ```bash
-# Scene detection: grab frame when >30% pixels change
-cv-run ffmpeg -i "$VIDEO_FILE" -vf "select='gt(scene,0.3)',showinfo" -vsync vfr -q:v 2 "$CACHE_DIR/frames/frame_%04d.jpg" 2>/dev/null
+# Scene detection with 20% change threshold (more frames than before)
+cv-run ffmpeg -i "$VIDEO_FILE" -vf "select='gt(scene,0.2)',showinfo" -vsync vfr -q:v 2 "$CACHE_DIR/frames/frame_%04d.jpg" 2>/dev/null
 
-# Count frames extracted
 FRAME_COUNT=$(ls "$CACHE_DIR/frames"/*.jpg 2>/dev/null | wc -l)
 ```
 
-**Option B: Time-based Sampling (if scene detection gives too few/many frames)**
-Calculate interval to get ~20-30 frames:
+**Option B: Time-based Sampling (fallback or supplement)**
+If scene detection gives too few frames (<20), supplement with time-based:
 ```bash
-# Calculate fps to get ~25 frames (duration/25 = interval between frames)
-cv-run ffmpeg -i "$VIDEO_FILE" -vf "fps=25/$DURATION" -q:v 2 "$CACHE_DIR/frames/frame_%04d.jpg" 2>/dev/null
+# Get ~60 evenly-spaced frames
+cv-run ffmpeg -i "$VIDEO_FILE" -vf "fps=60/$DURATION" -q:v 2 "$CACHE_DIR/frames/frame_%04d.jpg" 2>/dev/null
 ```
 
-**Frame Cap:** If either method produces >30 frames, keep only every Nth frame to stay under 30 total:
+**Frame Cap:** Keep up to 100 frames (vs 30 before):
 ```bash
-# If too many frames, thin them out
 FRAME_COUNT=$(ls "$CACHE_DIR/frames"/*.jpg | wc -l)
-if [ $FRAME_COUNT -gt 30 ]; then
-  # Keep every Nth frame where N = ceiling(count/30)
-  N=$(( (FRAME_COUNT + 29) / 30 ))
+if [ $FRAME_COUNT -gt 100 ]; then
+  N=$(( (FRAME_COUNT + 99) / 100 ))
   ls "$CACHE_DIR/frames"/*.jpg | awk "NR % $N != 1" | xargs rm -f
 fi
 ```
@@ -284,6 +213,18 @@ if [ -n "$SUBS_FILE" ]; then
 fi
 ```
 
+**For local videos without subtitles (full image only):**
+If using the full Docker image and no subtitles exist, offer to transcribe:
+```bash
+# Check if whisper is available
+if cv-run whisper --help &>/dev/null; then
+  # Extract audio and transcribe
+  cv-run ffmpeg -i "$VIDEO_FILE" -vn -acodec pcm_s16le -ar 16000 -ac 1 "/tmp/audio_$$.wav"
+  cv-run whisper "/tmp/audio_$$.wav" --model base --output_format srt --output_dir "$CACHE_DIR"
+  mv "$CACHE_DIR/audio_$$.srt" "$CACHE_DIR/subtitles.srt" 2>/dev/null
+fi
+```
+
 **Save metadata:**
 ```bash
 cat > "$CACHE_DIR/metadata.json" << EOF
@@ -291,47 +232,55 @@ cat > "$CACHE_DIR/metadata.json" << EOF
   "source": "$SOURCE",
   "title": "$TITLE",
   "duration": $DURATION,
+  "frame_count": $FRAME_COUNT,
+  "has_subtitles": $([ -f "$CACHE_DIR/subtitles.srt" ] && echo "true" || echo "false"),
   "timestamp": $(date +%s),
   "cached_date": "$(date -Iseconds)"
 }
 EOF
 ```
 
-**Cleanup temp files (but NOT the cache):**
+**Cleanup temp files:**
 ```bash
-rm -rf /tmp/video_dl_$$
+rm -rf /tmp/video_dl_$$ /tmp/audio_$$.*
 ```
 
-### Step 7: Read Frames
+### Step 5: Spawn Video Analyzer Agent
 
-Read all frames from cache using the Read tool:
-```bash
-ls "$CACHE_DIR/frames"/*.jpg | sort
+Now spawn the `video-analyzer` agent with all the extracted content. The agent gets a fresh 200k context.
+
+**Prepare the agent prompt:**
+
+```
+Analyze this video and answer the user's question.
+
+## Video Information
+- Title: <title from metadata>
+- Duration: <duration> seconds
+- Frames extracted: <count>
+
+## User's Question
+<the user's question about the video>
+
+## Transcript
+<contents of subtitles.srt if it exists, otherwise "No transcript available">
+
+## Frames
+<read all frames from $CACHE_DIR/frames/ and include them>
 ```
 
-Read them in parallel if there are many, but process them in order when describing.
-
-Also read subtitles if available:
-```bash
-if [ -f "$CACHE_DIR/subtitles.srt" ]; then
-  cat "$CACHE_DIR/subtitles.srt"
-fi
+**Use the Task tool to spawn the agent:**
+```
+Task tool with:
+- subagent_type: "video-analyzer" (or use the general-purpose agent with the video-analyzer prompt)
+- prompt: <the prepared prompt above>
 ```
 
-### Step 8: Analyze and Respond
+The agent will analyze all frames and transcript with its fresh context and return a comprehensive analysis.
 
-Based on the sequence of frames (and subtitles if available), describe what happened in the video. Consider:
-- What's on screen at the start vs end
-- Key transitions or changes between frames
-- Any errors, popups, or notable events
-- The overall narrative/flow of the session
-- What was said (from subtitles)
+### Step 6: Save Analysis Summary
 
-Respond to the user's prompt based on your analysis.
-
-### Step 9: Save Analysis Summary
-
-After analyzing, save a brief summary for future reference:
+After receiving the agent's response, extract the brief summary and save it:
 ```bash
 cat > "$CACHE_DIR/analysis.md" << 'EOF'
 # Video Analysis Summary
@@ -340,51 +289,34 @@ cat > "$CACHE_DIR/analysis.md" << 'EOF'
 **Analyzed:** <date>
 
 ## Summary
-<2-3 sentence summary of what the video shows>
-
-## Key Points
-- <point 1>
-- <point 2>
-- <point 3>
+<agent's brief summary>
 
 ## Original Question
 <user's question>
-
-## Answer Summary
-<brief answer given>
 EOF
 ```
 
-This helps with follow-up questions by providing context from the original analysis.
+### Step 7: Return Results
+
+Present the agent's analysis to the user. The main conversation context stays lean - only the summary is kept, not all the frames.
 
 ---
 
-## Example Usage
+## Why This Uses an Agent
 
-### Basic Analysis (with caching)
-- `/video https://youtube.com/watch?v=xyz what is this about` - Analyze YouTube video (cached)
-- `/video /path/to/recording.mp4 explain the bug` - Analyze local video (cached)
-- `/video what went wrong` - Analyze latest screen recording (cached)
-
-### Follow-up Questions
-- `/video follow-up what was the error message?` - Ask about most recent video
-- `/video -f how did they fix it?` - Short form follow-up
-
-### Cache Management
-- `/video --list` - See all cached videos
-- `/video --clear` - Remove all cached videos
-- `/video --clear abc123...` - Remove specific cached video
+Video analysis can involve 100+ frames and full transcripts. By spawning a dedicated agent:
+- Fresh 200k context for thorough analysis
+- More frames = better understanding
+- Full transcripts without truncation
+- Main conversation stays lean
+- Follow-up questions reuse cached frames
 
 ---
 
 ## Notes
 
-- Frame extraction uses `cv-run ffmpeg` (Docker or local)
-- YouTube downloads use `cv-run yt-dlp` (Docker or local)
+- Frame extraction uses `cv-run ffmpeg` (Docker)
+- YouTube downloads use `cv-run yt-dlp` (Docker)
+- Whisper transcription uses `cv-run whisper` (full image only)
 - Cache persists across sessions - use `--clear` to free space
-- Follow-up questions are instant since frames are already extracted
-- More frames = better understanding but more tokens
-- For long videos, consider asking about a specific part
-- **YouTube videos:** Auto-downloads captions/subtitles when available
-- **Local videos:** Audio transcription available via `cv-run whisper`
-- Scene detection + subtitles + ~30 frames = good coverage for most videos
+- The agent sees all frames; you only see the analysis

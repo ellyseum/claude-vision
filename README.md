@@ -2,6 +2,37 @@
 
 Visual context skills for Claude Code. Gives Claude the ability to see your clipboard, screenshots, and videos.
 
+## Why This Exists
+
+Claude Code can technically read images—you just paste in the file path and it'll analyze them. But the workflow is clunky:
+
+- You screenshot an error, but now you need to find where your OS saved it
+- You copy something to your clipboard, but there's no way to share it
+- You want Claude to look at a video, but... you can't
+
+This plugin fixes all of that. Instead of hunting for file paths, just:
+
+```
+/clipboard what's this?
+/screenshot explain this error
+/video summarize this tutorial
+```
+
+### Video Analysis
+
+Claude doesn't natively support video. But with some clever extraction, we can give it Gemini-like video understanding:
+
+1. **YouTube videos** → Extract auto-captions + key frames
+2. **Local videos** → Scene detection for key frames + optional whisper transcription
+3. **Screen recordings** → Same scene detection, finds the moments that matter
+
+The `/video` skill spawns a dedicated **analysis agent** with a fresh 200k context. This means:
+- 100+ frames instead of a handful
+- Full transcripts without truncation
+- Thorough analysis without bloating your conversation
+
+The result: Claude can "watch" videos by analyzing representative frames and reading the transcript. It handles tutorials, error recordings, meetings, and lectures surprisingly well.
+
 ## What's Included
 
 | Skill | Description |
@@ -14,13 +45,11 @@ Visual context skills for Claude Code. Gives Claude the ability to see your clip
 ## Quick Start
 
 ```bash
-# Clone the plugin
-git clone https://github.com/ellyseum/claude-vision.git ~/.claude/plugins/claude-vision
+# Add the marketplace and install the plugin
+/plugin marketplace add ellyseum/claude-vision
+/plugin install claude-vision@ellyseum-claude-vision
 
-# Start Claude with the plugin
-claude --plugin-dir ~/.claude/plugins/claude-vision
-
-# Run setup
+# Run setup (auto-runs on first use of any skill)
 /claude-vision-setup
 ```
 
@@ -80,9 +109,13 @@ To enable GPU:
 
 ### Screenshot
 
+Auto-detects your screenshot directory (configured during setup) and finds the most recent file by timestamp.
+
 ```bash
 /screenshot what's the error here?
-/screenshot
+/screenshot                              # Describes what it sees
+/screenshot analyze the last 3 screenshots
+/screenshot compare these two screenshots
 ```
 
 ### Video
