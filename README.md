@@ -1,4 +1,15 @@
-# claude-vision
+<p align="center">
+  <img src="assets/logo.png" alt="claude-vision logo" width="100">
+</p>
+
+<h1 align="center">claude-vision</h1>
+
+<p align="center">
+  <a href="https://github.com/ellyseum/claude-vision"><img src="https://img.shields.io/badge/Claude_Code-Plugin-blueviolet" alt="Claude Code Plugin"></a>
+  <a href="https://github.com/ellyseum/claude-vision/pkgs/container/claude-vision"><img src="https://img.shields.io/badge/docker-ghcr.io-blue" alt="Docker"></a>
+  <a href="#platform-support"><img src="https://img.shields.io/badge/platform-WSL%20|%20macOS%20|%20Linux-lightgrey" alt="Platform"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+</p>
 
 Visual context skills for Claude Code. Gives Claude the ability to see your clipboard, screenshots, and videos.
 
