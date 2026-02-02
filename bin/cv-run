@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+#
+# cv-run - Run commands in the claude-vision Docker container
+#
+# Usage:
+#   cv-run ffmpeg -i video.mp4 ...
+#   cv-run yt-dlp https://youtube.com/...
+#   cv-run whisper audio.mp3
+#   cv-run --stop              # Stop the container
+#   cv-run --status            # Check container status
+#   cv-run --build             # Build full image (with whisper)
+#   cv-run --build-lite        # Build lite image (ffmpeg + yt-dlp only)
+#
+
+set -e
+
+CONTAINER_NAME="claude-vision"
+CONFIG_FILE="$HOME/.claude/claude-vision/config.json"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Get config value
+get_config() {
+    local key="$1"
+    local default="$2"
+    if [[ -f "$CONFIG_FILE" ]]; then
+        val=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$CONFIG_FILE" | cut -d'"' -f4)
+        echo "${val:-$default}"
+    else
+        echo "$default"
+    fi
+}
+
+# Get image name based on variant
+get_image_name() {
+    local variant=$(get_config "image_variant" "full")
+    if [[ "$variant" == "lite" ]]; then
+        echo "claude-vision:lite"
+    else
+        echo "claude-vision:full"
+    fi
+}
+
+# Check if running in Docker mode
+get_mode() {
+    get_config "mode" "auto"
+}
+
+# Check if Docker is available
+docker_available() {
+    command -v docker &>/dev/null && docker info &>/dev/null
+}
+
+# Check if NVIDIA GPU is available for Docker
+gpu_available() {
+    # Check if nvidia-smi exists and works
+    if ! command -v nvidia-smi &>/dev/null; then
+        return 1
+    fi
+
+    # Check if nvidia-smi can communicate with driver
+    if ! nvidia-smi &>/dev/null; then
+        return 1
+    fi
+
+    # Check if nvidia container toolkit is installed
+    if docker info 2>/dev/null | grep -qi nvidia; then
+        return 0
+    fi
+
+    # Alternative check - try to see if nvidia runtime exists
+    if docker info 2>/dev/null | grep -q "nvidia"; then
+        return 0
+    fi
+
+    # Check for nvidia-container-toolkit
+    if command -v nvidia-container-toolkit &>/dev/null || \
+       [[ -f /usr/bin/nvidia-container-runtime ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if local tools are available
+local_available() {
+    local cmd="$1"
+    command -v "$cmd" &>/dev/null
+}
+
+# Ensure container is running
+ensure_container() {
+    local IMAGE_NAME=$(get_image_name)
+
+    if ! docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
+        if docker ps -aq -f name="$CONTAINER_NAME" | grep -q .; then
+            # Container exists but stopped, start it
+            echo -e "${YELLOW}Starting $CONTAINER_NAME container...${NC}" >&2
+            docker start "$CONTAINER_NAME" >/dev/null
+        else
+            # Container doesn't exist, create it
+            if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+                echo -e "${RED}Image '$IMAGE_NAME' not found. Run: cv-run --build${NC}" >&2
+                exit 1
+            fi
+
+            echo -e "${YELLOW}Creating $CONTAINER_NAME container...${NC}" >&2
+
+            # Pre-create mount directories to avoid root ownership
+            mkdir -p "$HOME/.claude/claude-vision"
+            mkdir -p "$HOME/.claude/claude-vision/video-cache"
+
+            # Determine volume mounts based on OS
+            MOUNTS="-v /tmp:/tmp"
+            MOUNTS="$MOUNTS -v $HOME/.claude/claude-vision:/root/.claude/claude-vision"
+
+            # Add OS-specific mounts
+            if [[ -d /mnt/c ]]; then
+                # WSL - mount Windows drives
+                MOUNTS="$MOUNTS -v /mnt/c:/mnt/c"
+                [[ -d /mnt/d ]] && MOUNTS="$MOUNTS -v /mnt/d:/mnt/d"
+            elif [[ "$(uname)" == "Darwin" ]]; then
+                # macOS
+                MOUNTS="$MOUNTS -v /Users:/Users"
+            else
+                # Linux
+                MOUNTS="$MOUNTS -v /home:/home"
+            fi
+
+            # Check for GPU support
+            GPU_FLAGS=""
+            if gpu_available; then
+                echo -e "${CYAN}GPU detected - enabling CUDA support${NC}" >&2
+                GPU_FLAGS="--gpus all"
+            fi
+
+            docker run -d --name "$CONTAINER_NAME" $GPU_FLAGS $MOUNTS "$IMAGE_NAME" >/dev/null
+        fi
+    fi
+}
+
+# Run command in container
+run_docker() {
+    ensure_container
+    docker exec "$CONTAINER_NAME" "$@"
+}
+
+# Run command locally
+run_local() {
+    "$@"
+}
+
+GHCR_IMAGE="ghcr.io/ellyseum/claude-vision"
+
+# Pull pre-built image from ghcr.io
+pull_image() {
+    local variant="$1"
+    echo -e "${YELLOW}Pulling $GHCR_IMAGE:$variant from GitHub Container Registry...${NC}"
+    if docker pull "$GHCR_IMAGE:$variant"; then
+        docker tag "$GHCR_IMAGE:$variant" "claude-vision:$variant"
+        echo -e "${GREEN}Pull complete${NC}"
+    else
+        echo -e "${RED}Pull failed. You may need to build locally: cv-run --build-$variant${NC}"
+        exit 1
+    fi
+}
+
+# Build image locally
+build_image() {
+    local variant="$1"
+    local SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local REPO_DIR="$(dirname "$SCRIPT_DIR")"
+
+    if [[ "$variant" == "lite" ]]; then
+        echo -e "${YELLOW}Building claude-vision:lite image (ffmpeg + yt-dlp only)...${NC}"
+        docker build -t "claude-vision:lite" -f "$REPO_DIR/Dockerfile.lite" "$REPO_DIR"
+    else
+        echo -e "${YELLOW}Building claude-vision:full image (includes whisper)...${NC}"
+        echo -e "${CYAN}This will take a while - whisper + PyTorch is ~4GB${NC}"
+        docker build -t "claude-vision:full" -f "$REPO_DIR/Dockerfile" "$REPO_DIR"
+    fi
+    echo -e "${GREEN}Build complete${NC}"
+}
+
+# Show status
+show_status() {
+    local IMAGE_NAME=$(get_image_name)
+
+    echo -e "${CYAN}Configuration:${NC}"
+    echo "  Config file: $CONFIG_FILE"
+    echo "  Mode: $(get_mode)"
+    echo "  Image variant: $(get_config "image_variant" "full")"
+    echo ""
+
+    echo -e "${CYAN}Images:${NC}"
+    if docker image inspect "claude-vision:full" &>/dev/null; then
+        local size=$(docker image inspect "claude-vision:full" --format '{{.Size}}' | awk '{printf "%.1f GB", $1/1024/1024/1024}')
+        echo -e "  claude-vision:full  ${GREEN}available${NC} ($size)"
+    else
+        echo -e "  claude-vision:full  ${RED}not built${NC}"
+    fi
+    if docker image inspect "claude-vision:lite" &>/dev/null; then
+        local size=$(docker image inspect "claude-vision:lite" --format '{{.Size}}' | awk '{printf "%.1f MB", $1/1024/1024}')
+        echo -e "  claude-vision:lite  ${GREEN}available${NC} ($size)"
+    else
+        echo -e "  claude-vision:lite  ${RED}not built${NC}"
+    fi
+    echo ""
+
+    echo -e "${CYAN}Container:${NC}"
+    if docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
+        echo -e "  Status: ${GREEN}running${NC}"
+        docker ps -f name="$CONTAINER_NAME" --format "  Image: {{.Image}}\n  Uptime: {{.Status}}"
+    elif docker ps -aq -f name="$CONTAINER_NAME" | grep -q .; then
+        echo -e "  Status: ${YELLOW}stopped${NC}"
+    else
+        echo -e "  Status: ${RED}not created${NC}"
+    fi
+    echo ""
+
+    echo -e "${CYAN}GPU:${NC}"
+    if gpu_available; then
+        echo -e "  ${GREEN}Available${NC} - whisper will use CUDA acceleration"
+        nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/  /'
+    else
+        echo -e "  ${YELLOW}Not available${NC} - whisper will use CPU (slower)"
+        echo "  To enable: install NVIDIA drivers + nvidia-container-toolkit"
+    fi
+}
+
+# Main logic
+main() {
+    case "${1:-}" in
+        --stop)
+            if docker ps -q -f name="$CONTAINER_NAME" | grep -q .; then
+                docker stop "$CONTAINER_NAME" >/dev/null
+                echo -e "${GREEN}Container stopped${NC}"
+            else
+                echo -e "${YELLOW}Container not running${NC}"
+            fi
+            exit 0
+            ;;
+        --status)
+            show_status
+            exit 0
+            ;;
+        --pull)
+            pull_image "full"
+            exit 0
+            ;;
+        --pull-lite)
+            pull_image "lite"
+            exit 0
+            ;;
+        --pull-full)
+            pull_image "full"
+            exit 0
+            ;;
+        --build)
+            build_image "full"
+            exit 0
+            ;;
+        --build-lite)
+            build_image "lite"
+            exit 0
+            ;;
+        --build-full)
+            build_image "full"
+            exit 0
+            ;;
+        --rm)
+            docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+            echo -e "${GREEN}Container removed${NC}"
+            exit 0
+            ;;
+        "")
+            echo "Usage: cv-run <command> [args...]"
+            echo ""
+            echo "Commands:"
+            echo "  cv-run ffmpeg ...     Run ffmpeg"
+            echo "  cv-run yt-dlp ...     Run yt-dlp"
+            echo "  cv-run whisper ...    Run whisper (full image only)"
+            echo ""
+            echo "Image options (pick one):"
+            echo "  --pull          Pull full image from ghcr.io (recommended)"
+            echo "  --pull-lite     Pull lite image from ghcr.io"
+            echo "  --build         Build full image locally (~6 min)"
+            echo "  --build-lite    Build lite image locally (~1 min)"
+            echo ""
+            echo "Container options:"
+            echo "  --status        Show detailed status"
+            echo "  --stop          Stop the container"
+            echo "  --rm            Remove the container"
+            exit 0
+            ;;
+    esac
+
+    local cmd="$1"
+    local mode=$(get_mode)
+    local IMAGE_NAME=$(get_image_name)
+
+    case "$mode" in
+        docker)
+            if ! docker_available; then
+                echo -e "${RED}Docker not available but config is set to docker mode${NC}" >&2
+                exit 1
+            fi
+            run_docker "$@"
+            ;;
+        local)
+            if ! local_available "$cmd"; then
+                echo -e "${RED}$cmd not found locally but config is set to local mode${NC}" >&2
+                exit 1
+            fi
+            run_local "$@"
+            ;;
+        auto|*)
+            # Try Docker first, fall back to local
+            if docker_available && docker image inspect "$IMAGE_NAME" &>/dev/null; then
+                run_docker "$@"
+            elif local_available "$cmd"; then
+                run_local "$@"
+            else
+                echo -e "${RED}Neither Docker nor local $cmd available${NC}" >&2
+                echo "Run 'cv-run --build' to build Docker image, or install $cmd locally" >&2
+                exit 1
+            fi
+            ;;
+    esac
+}
+
+main "$@"

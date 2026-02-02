@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+# Install system dependencies (ffmpeg only)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yt-dlp only (no whisper/pytorch)
+RUN pip install --no-cache-dir yt-dlp
+
+# Create working directory
+WORKDIR /work
+
+# Keep container running
+CMD ["tail", "-f", "/dev/null"]
