@@ -78,10 +78,19 @@ fi
 
 The output will be `FILES:C:\path\to\file.ext`
 
+**IMPORTANT:** Don't use sed to convert paths - bash interprets `\U` in `C:\Users` as unicode escape.
+Use `wslpath` or get the path directly from PowerShell:
+
 ```bash
-# Extract and convert Windows path to WSL
-WIN_PATH="<extracted_path>"
-WSL_PATH=$(echo "$WIN_PATH" | sed 's|\\|/|g' | sed 's|^\([A-Za-z]\):|/mnt/\L\1|')
+# Get file path properly (avoids bash escape issues)
+WIN_PATH=$(powershell.exe -command '
+Add-Type -AssemblyName System.Windows.Forms
+$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+foreach ($f in $files) { Write-Output $f }
+' | tr -d '\r' | head -1)
+
+# Convert using wslpath (the proper way)
+WSL_PATH=$(wslpath "$WIN_PATH")
 ```
 
 Check file type:
