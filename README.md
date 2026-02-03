@@ -57,8 +57,8 @@ The result: Claude can "watch" videos by analyzing representative frames and rea
 
 ```bash
 # Add the marketplace and install the plugin
-/plugin marketplace add ellyseum/claude-vision
-/plugin install claude-vision@ellyseum-claude-vision
+/plugin marketplace add ellyseum/claude-plugins
+/plugin install claude-vision
 
 # Run setup (auto-runs on first use of any skill)
 /claude-vision-setup
