@@ -11,5 +11,12 @@ Thumbs.db
 # Local config (user-specific)
 config.local.json
 
+# Dependencies
+node_modules/
+
+# Secrets
+*.env
+
 # Docker
 *.log
+docker-pull.log

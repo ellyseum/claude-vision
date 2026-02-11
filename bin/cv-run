@@ -130,7 +130,7 @@ ensure_container() {
 
             # Determine volume mounts based on OS
             MOUNTS="-v /tmp:/tmp"
-            MOUNTS="$MOUNTS -v $HOME/.claude/claude-vision:/root/.claude/claude-vision"
+            MOUNTS="$MOUNTS -v $HOME/.claude/claude-vision:$HOME/.claude/claude-vision"
 
             # Add OS-specific mounts
             if [[ -d /mnt/c ]]; then
@@ -339,8 +339,7 @@ main() {
             elif local_available "$cmd"; then
                 run_local "$@"
             else
-                echo -e "${RED}Neither Docker nor local $cmd available${NC}" >&2
-                echo "Run 'cv-run --build' to build Docker image, or install $cmd locally" >&2
+                echo -e "${RED}No tools available. Install ffmpeg/yt-dlp locally or pull Docker image.${NC}" >&2
                 exit 1
             fi
             ;;

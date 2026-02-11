@@ -7,60 +7,32 @@ description: Read the latest screenshot and respond to a prompt about it
 
 When this skill is invoked with `/screenshot <prompt>`:
 
-### Step 1: Setup Check
+The screenshot has already been found by a PreToolUse hook. Check the system-reminder for "Screenshot:" which contains the type and path.
 
-**IMPORTANT:** Before doing anything else, check if claude-vision is configured:
+Format: `TYPE:<type>\n<path or info>`
 
-```bash
-CONFIG_FILE="$HOME/.claude/claude-vision/config.json"
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "claude-vision is not configured yet. Starting setup..."
-fi
-```
+Types:
+- `TYPE:IMAGE` - path to latest screenshot follows
+- `TYPE:NOT_CONFIGURED` - claude-vision not set up, run `/claude-vision-setup`
+- `TYPE:DIR_NOT_FOUND` - configured directory doesn't exist
+- `TYPE:NO_SCREENSHOTS` - no screenshots found in directory
 
-If the config file doesn't exist, **immediately run `/claude-vision-setup`** to configure, then return here and continue with the user's original request.
+### Handle Based on Type
 
-### Step 2: Get Screenshot Directory
+**TYPE:IMAGE**
+- Read the image using the Read tool
+- Respond to the user's prompt based on what you see
+- If no prompt provided, just describe what's in the screenshot
 
-```bash
-SCREENSHOT_DIR=$(grep -o '"screenshot_dir"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" | cut -d'"' -f4)
-# Expand ~ if present
-SCREENSHOT_DIR="${SCREENSHOT_DIR/#\~/$HOME}"
+**TYPE:NOT_CONFIGURED**
+- Tell user to run `/claude-vision-setup` first
 
-if [[ -z "$SCREENSHOT_DIR" ]] || [[ ! -d "$SCREENSHOT_DIR" ]]; then
-    echo "Screenshot directory not configured or not found: $SCREENSHOT_DIR"
-    echo "Run /claude-vision-setup to reconfigure."
-    exit 1
-fi
+**TYPE:DIR_NOT_FOUND**
+- Tell user the configured screenshot directory wasn't found
+- Suggest running `/claude-vision-setup` to reconfigure
 
-echo "Screenshot directory: $SCREENSHOT_DIR"
-```
-
-### Step 2: Find Latest Screenshot
-
-Find the newest image file in the configured directory:
-
-```bash
-LATEST=$(find "$SCREENSHOT_DIR" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
-
-if [[ -z "$LATEST" ]]; then
-    echo "No screenshots found in $SCREENSHOT_DIR"
-    exit 1
-fi
-
-echo "Latest screenshot: $LATEST"
-```
-
-**Note:** On macOS, `find` doesn't support `-printf`. Use this instead:
-```bash
-LATEST=$(find "$SCREENSHOT_DIR" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" \) -exec stat -f '%m %N' {} \; 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
-```
-
-### Step 3: Read and Analyze
-
-Read the image using the Read tool, then respond to the user's prompt based on what you see.
-
-If no prompt was provided, just describe what's in the screenshot.
+**TYPE:NO_SCREENSHOTS**
+- Tell user no screenshots were found in the configured directory
 
 ---
 
@@ -73,29 +45,12 @@ If no prompt was provided, just describe what's in the screenshot.
 
 ## Configuration
 
-Screenshot directory is stored in `~/.claude/claude-vision/config.json`:
-
-```json
-{
-    "screenshot_dir": "/path/to/screenshots",
-    ...
-}
-```
-
-Run `/claude-vision-setup` to configure.
+Screenshot directory is stored in `~/.claude/claude-vision/config.json`. Run `/claude-vision-setup` to configure.
 
 ## Default Directories by Platform
-
-If not configured, these are typical locations:
 
 | Platform | Default Location |
 |----------|-----------------|
 | WSL | `/mnt/c/Users/<user>/Pictures/Screenshots` |
 | macOS | `~/Desktop` or `~/Pictures/Screenshots` |
 | Linux | `~/Pictures/Screenshots` or `~/Pictures` |
-
-## Notes
-
-- If no arguments provided, just describe what you see
-- Searches only the top level of the screenshot directory (not subdirectories)
-- Supports `.png`, `.jpg`, `.jpeg` files
