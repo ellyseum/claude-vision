@@ -14,11 +14,11 @@ SKILL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.args // empty')
 
 # Check if this is a vision command
 IS_VISION=""
-if [[ "$PROMPT" == *"/clipboard"* ]] || [[ "$SKILL_NAME" == *"clipboard"* ]]; then
+if [[ "$PROMPT" == "/clipboard"* ]] || [[ "$SKILL_NAME" == *"clipboard"* ]]; then
     IS_VISION="clipboard"
-elif [[ "$PROMPT" == *"/screenshot"* ]] || [[ "$SKILL_NAME" == *"screenshot"* ]]; then
+elif [[ "$PROMPT" == "/screenshot"* ]] || [[ "$SKILL_NAME" == *"screenshot"* ]]; then
     IS_VISION="screenshot"
-elif [[ "$PROMPT" == *"/video"* ]] || [[ "$SKILL_NAME" == *"video"* ]]; then
+elif [[ "$PROMPT" == "/video"* ]] || [[ "$SKILL_NAME" == *"video"* ]]; then
     IS_VISION="video"
 fi
 
